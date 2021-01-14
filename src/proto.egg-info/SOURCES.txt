@@ -1,0 +1,14 @@
+README.md
+setup.py
+src/proto/__init__.py
+src/proto/data.py
+src/proto/model.py
+src/proto/train.py
+src/proto/util.py
+src/proto.egg-info/PKG-INFO
+src/proto.egg-info/SOURCES.txt
+src/proto.egg-info/dependency_links.txt
+src/proto.egg-info/top_level.txt
+test/test_data.py
+test/test_model.py
+test/test_train.py
