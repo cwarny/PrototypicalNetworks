@@ -136,7 +136,7 @@ class CategorizeProcessor(Processor):
             for cat,idx in sorted(self.special_categories, key=lambda d:d[1]):
                 if cat in self.ids_to_categories: self.ids_to_categories.remove(cat)
                 self.ids_to_categories.insert(idx, cat)
-        if getattr(self, 'otoi', None) is None:
+        if getattr(self, 'categories_to_ids', None) is None:
             self.categories_to_ids  = defaultdict(lambda: self.unk[1], {
                 v:k for k,v in enumerate(self.ids_to_categories)
             })
