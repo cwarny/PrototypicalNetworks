@@ -67,14 +67,14 @@ def test_learner():
     data = DataBunch(train_dl, valid_dl)
 
     def loss(out,yb): return out.mean()
-    def acc(out,yb): return 0
+    def metric(out,yb): return 0
 
     # ensure StopEarly runs after DummyCallback
     StopEarly._order = 3
 
     callbacks = [
         DummyCallback(),
-        Measure(acc),
+        Measure(metric),
         StopEarly(patience=0)
     ]
 

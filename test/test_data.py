@@ -5,36 +5,53 @@ import torch
 from transformers import BertTokenizer
 from proto.data import load_data, read_tsv, DataBunch
 
-args = argparse.Namespace(
-    data_dir='data',
-    train_path='train.tsv',
-    valid_path='valid.tsv',
-    n_way=3,
-    n_episodes=4,
-    n_support=5,
-    n_query=6,
-    bert_model_name='bert-base-uncased'
-)
+config = {
+    'data': {
+        'data_dir': 'data',
+        'train_path': 'train.tsv',
+        'valid_path': 'valid.tsv'
+    },
+    'train': {
+        'episode': {
+            'classification_cardinality': 3,
+            'shots': 5,
+            'queries': 6
+        },
+        'episodes': 4,
+    },
+    'model': {
+        'encoder': {
+            'model_name': 'bert-base-uncased'
+        }
+    }
+}
 
 @pytest.fixture(scope="module")
 def tokenizer_fixt():
-    tokenizer = BertTokenizer.from_pretrained(args.bert_model_name)
+    tokenizer = BertTokenizer.from_pretrained(config['model']['encoder']['model_name'])
     return tokenizer
 
 @pytest.fixture(scope="module")
-def cache_fixt():
-    df = read_tsv(Path(args.data_dir)/args.train_path, 
+def data_per_class_fixt():
+    data_dir = Path(config['data']['data_dir'])
+    train_path = config['data']['train_path']
+    df = read_tsv(data_dir/train_path, 
         names=['intent', 'text', 'ner'], nrows=1000)
-    cache = {
+    shots = config['train']['episode']['shots']
+    queries = config['train']['episode']['queries']
+    data_per_class = {
         k: g['text'].tolist() for k,g in df.groupby('intent')
-        if len(g) >= args.n_support+args.n_query
+        if len(g) >= shots+queries
     }
-    return cache
+    return data_per_class
 
-def test_load_data(cache_fixt, tokenizer_fixt):
-    class_names = list(cache_fixt.keys())
-    dl = load_data(class_names, cache_fixt, tokenizer_fixt, args)
-    assert len(dl) == args.n_episodes
+def test_load_data(data_per_class_fixt, tokenizer_fixt):
+    classes = list(data_per_class_fixt.keys())
+    episodes = config['train']['episodes']
+    episode_config = config['train']['episode']
+    dl = load_data(classes, data_per_class_fixt, tokenizer_fixt, 
+        episodes, episode_config)
+    assert len(dl) == episodes
     for xb,yb in dl: break # load one batch
     # input batch has both support and query vectors
     assert isinstance(xb, tuple) and len(xb) == 2
@@ -42,20 +59,25 @@ def test_load_data(cache_fixt, tokenizer_fixt):
     assert isinstance(xs, torch.Tensor)
     assert isinstance(xq, torch.Tensor)
     assert isinstance(yb, torch.Tensor)
-    assert xs.size(0) == xq.size(0) == args.n_way, \
-        'there should be {} classes per batch'.format(args.n_way)
-    assert xs.size(1) == args.n_support, \
-        'there should be {} support sequences'.format(args.n_support)
-    assert xq.size(1) == args.n_query, \
-        'there should be {} query sequences'.format(args.n_query)
+    assert xs.size(0) == xq.size(0), \
+        'support and query seqs should have the same number of classes'
+    assert xq.size(0) == episode_config['classification_cardinality']
+    assert xs.size(1) == episode_config['shots']
+    assert xq.size(1) == episode_config['queries']
     assert xs.size(2) == xq.size(2), \
-        'support and query sequences should be padded to the same length'
+        'support and query seqs should be padded to the same length'
 
-def test_databunch_instantiation(cache_fixt, tokenizer_fixt):
+def test_databunch_instantiation(data_per_class_fixt, tokenizer_fixt):
+    episodes = config['train']['episodes']
+    episode_config = config['train']['episode']
     def load(path):
-        class_names = list(cache_fixt.keys())
-        return load_data(class_names, cache_fixt, tokenizer_fixt, args)
-    data = DataBunch.from_data_dir(args.data_dir, 
-        args.train_path, args.valid_path, load_func=load)
+        classes = list(data_per_class_fixt.keys())
+        return load_data(classes, data_per_class_fixt, 
+            tokenizer_fixt, episodes, episode_config)
+    data_dir = Path(config['data']['data_dir'])
+    train_path = config['data']['train_path']
+    valid_path = config['data']['valid_path']
+    data = DataBunch.from_data_dir(data_dir, train_path, 
+        valid_path, load_func=load)
     assert hasattr(data, 'train_dl')
     assert hasattr(data, 'valid_dl')

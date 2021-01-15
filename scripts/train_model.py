@@ -1,4 +1,5 @@
 import argparse
+import yaml
 from functools import partial
 import torch
 import torch.optim as optim
@@ -10,18 +11,13 @@ from proto.model import ProtoNet
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data-dir', type=str)
-    parser.add_argument('--train-path', type=str, default='train.tsv')
-    parser.add_argument('--valid-path', type=str, default='valid.tsv')
-    parser.add_argument('--n-way', type=int, default=60)
-    parser.add_argument('--n-episodes', type=int, default=100)
-    parser.add_argument('--n-support', type=int, default=5)
-    parser.add_argument('--n-query', type=int, default=5)
-    parser.add_argument('--bert_model_name', type=str, default='bert-base-uncased')
-    parser.add_argument('--decay-every', type=int, default=20)
-    parser.add_argument('--learning-rate', type=float, default=1e-3)
-    parser.add_argument('--weight-decay', type=float, default=0.)
+    parser.add_argument('-c', '--config', type=str)
     return parser.parse_args()
+
+def parse_config(path):
+    with open(path) as infile:
+        config = yaml.safe_load(infile)
+    return config
 
 def loss(out, yb):
     '''
@@ -52,37 +48,55 @@ def accuracy(out, yb):
     _, y_hat = out.max(-1)
     return torch.eq(y_hat, yb.squeeze()).float().mean()
 
-def main(args):
-    tokenizer = BertTokenizer.from_pretrained(args.bert_model_name)
+def train_model(config):
+    data_config = config['data']
+    model_config = config['model']
+    train_config = config['train']
+    episode_config = train_config['episode']
+    tokenizer = BertTokenizer.from_pretrained(model_config['encoder']['model_name'])
 
     def load(path):
         df = read_tsv(path, names=['intent', 'text', 'ner'])
-        cache = {
+        shots = episode_config['shots']
+        queries = episode_config['queries']
+        episodes = train_config['episodes']
+        data_per_class = {
             k: g['text'].tolist() for k,g in df.groupby('intent')
-            if len(g) >= args.n_support+args.n_query
+            if len(g) >= shots+queries
         }
-        class_names = list(cache.keys())
-        return load_data(class_names, cache, tokenizer, args)
+        classes = list(data_per_class.keys())
+        return load_data(classes, data_per_class, tokenizer, 
+            episodes, episode_config)
     
-    data = DataBunch.from_data_dir(args.data_dir, 
-        args.train_path, args.valid_path, load_func=load)
+    data_dir = data_config['data_dir']
+    train_path = data_config['train_path']
+    valid_path = data_config['valid_path']
+    data = DataBunch.from_data_dir(data_dir, train_path, 
+        valid_path, load_func=load)
 
+    optim_config = train_config['optimization']
     callbacks = [
         Measure(accuracy),
-        SetDevice(args.device),
+        SetDevice(config['device']),
         StopEarly(),
-        Schedule(args.decay_every)
+        Schedule(optim_config['decay_every'])
     ]
 
-    model = ProtoNet(bert_model_name=args.bert_model_name)
+    model = ProtoNet(bert_model_name=model_config['encoder']['model_name'])
 
     opt_func = partial(optim.Adam, 
-        lr=args.learning_rate, weight_decay=args.weight_decay)
+        lr=optim_config['learning_rate'], 
+        weight_decay=model_config['weight_decay'])
     
     learner = Learner(model, data, loss, opt_func, callbacks=callbacks)
-    learner.fit(args.n_epochs)
+    learner.fit(train_config['epochs'])
 
 if __name__ == '__main__':
     args = parse_args()
-    args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    main(args)
+    config = parse_config(args.config)
+    torch.manual_seed(0)
+    if torch.cuda.is_available() and config['cuda']:
+        config['device'] = torch.device('cuda')
+    else:
+        config['device'] = torch.device('cpu')
+    train_model(config)
