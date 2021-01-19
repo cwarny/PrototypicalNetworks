@@ -1,0 +1,22 @@
+data:
+  data_dir: 'data/mini'
+  train_path: 'train.tsv'
+  valid_path: 'test.tsv'
+
+train:
+  epochs: 1000
+  episodes: 100
+  episode:
+    classification_cardinality: 10 # number of classes per episode
+    shots: 5 # the number of labelled samples per class ("support vectors")
+    queries: 5 # the number of unlabelled samples per class ("query vectors"); they need to be classified in the right class
+  optimization:
+    learning_rate: 1.e-3
+    decay_every: 20
+
+model:
+  encoder:
+    model_name: 'bert-base-uncased'
+  weight_decay: 0.
+
+cuda: False
