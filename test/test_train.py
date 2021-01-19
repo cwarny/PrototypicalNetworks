@@ -49,6 +49,8 @@ def test_learner():
             self.learner.log.append('after_loss')
         def after_backward(self): 
             self.learner.log.append('after_backward')
+        def after_step(self): 
+            self.learner.log.append('after_step')
         def after_batch(self): 
             self.learner.log.append('after_batch')
         def begin_validate(self): 
@@ -91,7 +93,7 @@ def test_learner():
     # number of times and in the right order
     assert learner.log == ['begin_fit', 'begin_epoch'] \
         + ['begin_batch','after_forward','after_loss','after_backward',
-            'after_batch']*(data_size//batch_size) \
+            'after_step', 'after_batch']*(data_size//batch_size) \
         + ['begin_validate'] \
         + ['begin_batch','after_forward','after_loss',
             'after_batch']*(data_size//batch_size) \

@@ -11,7 +11,7 @@ from proto.model import ProtoNet
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', type=str)
+    parser.add_argument('-c', '--config', type=str, required=True)
     return parser.parse_args()
 
 def parse_config(path):
@@ -62,8 +62,10 @@ def train_model(config):
         episodes = train_config['episodes']
         data_per_class = {
             k: g['text'].tolist() for k,g in df.groupby('intent')
-            if len(g) >= shots+queries
+            if len(g) >= shots+queries # class needs to have at least `shots+queries` utterances
         }
+        # `data_per_class` is a cache of the data 
+        # grouped by class name
         classes = list(data_per_class.keys())
         return load_data(classes, data_per_class, tokenizer, 
             episodes, episode_config)

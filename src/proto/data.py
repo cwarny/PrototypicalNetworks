@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from torch import LongTensor
 from torch.utils.data import Dataset, DataLoader
-from .util import compose, parallel, to_dict, listify
+from .util import compose, parallel
 
 class ListDataset(Dataset):
     def __init__(self, lst, load=lambda x: x, path=None):

@@ -24,8 +24,5 @@ def parallel(func, arr, max_workers=4):
     if any([o is not None for o in results]):
         return results
 
-def to_dict(k, v):
-    return { k: v }
-
 def dict_logger(x):
     print(json.dumps(x, indent=4))

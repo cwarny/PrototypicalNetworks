@@ -156,7 +156,7 @@ class Schedule(Callback):
         self.learner.scheduler = lr_scheduler.StepLR(self.opt, 
             self.decay_every, gamma=0.5)
 
-    def begin_epoch(self):
+    def after_step(self):
         self.scheduler.step()
 
 class Learner:
@@ -167,6 +167,7 @@ class Learner:
         'after_forward',
         'after_loss',
         'after_backward',
+        'after_step',
         'after_batch',
         'begin_validate',
         'after_epoch',
@@ -201,6 +202,8 @@ class Learner:
             if not self.in_train: return
             self.loss.backward()
             self('after_backward')
+            self.opt.step()
+            self('after_step')
         except CancelBatchException:
             self('after_cancel_batch')
         finally:
