@@ -22,7 +22,7 @@ This technique is useful when we have very limited training data.
 
 ## Train model
 
-* `python scripts/train_model.py --data-dir <data dir with the train.tsv, valid.tsv, test.tsv files>`
+* `python scripts/train_model.py -c <yaml config file>`
 
 ## Run tests
 
