@@ -15,18 +15,22 @@ This means that the classes a prototypical network is applied on at inference ti
 
 This technique is useful when we have very limited training data.
 
+## Setup
+
+* `python setup.py install`
+* `pip install -r requirements.txt`
+
 ## Prepare data
 
 * `python scripts/prepare_data.py --data-dir data --input <tsv file>`
-* input tsv file should be in the classic Alexa 3-col format (domain, intent, anno)
+* Input tsv file should be in the classic Alexa 3-col format (domain, intent, anno)
+* Example tsv file can be found here: `/apollo/env/HoverboardDefaultMLPS3Tool/bin/mlps3 cp -k "com.amazon.snl-3pi18n.team.hoverboard" s3://hoverboard-shared-snl-3pi18n-eu-west-1/nlu/datasets/fud.tsv.tgz .`
 
 ## Train model
 
-<<<<<<< HEAD
+* `/apollo/env/HoverboardDefaultMLPS3Tool/bin/mlps3 cp -r s3://blu-core-model-training-eu/snl/models/huggingface ~/.cache`
+* If necessary, update the key *model > encoder > model_dir* in the config file: `emacs <yaml config file>`
 * `python scripts/train_model.py -c <yaml config file>`
-=======
-* `python scripts/train_model.py --data-dir <data dir with the train.tsv, valid.tsv, test.tsv files>`
->>>>>>> mainline
 
 ## Run tests
 

@@ -53,7 +53,8 @@ def train_model(config):
     model_config = config['model']
     train_config = config['train']
     episode_config = train_config['episode']
-    tokenizer = BertTokenizer.from_pretrained(model_config['encoder']['model_name'])
+    tokenizer = BertTokenizer.from_pretrained(model_config['encoder']['model_name'], 
+        model_dir=model_config['encoder']['model_dir'])
 
     def load(path):
         df = read_tsv(path, names=['intent', 'text', 'ner'])
@@ -62,7 +63,8 @@ def train_model(config):
         episodes = train_config['episodes']
         data_per_class = {
             k: g['text'].tolist() for k,g in df.groupby('intent')
-            if len(g) >= shots+queries # class needs to have at least `shots+queries` utterances
+            if len(g) >= shots+queries 
+            # class needs to have at least `shots+queries` utterances
         }
         # `data_per_class` is a cache of the data 
         # grouped by class name

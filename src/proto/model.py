@@ -4,9 +4,9 @@ import torch.nn.functional as F
 from transformers import BertModel
 
 class ProtoNet(nn.Module):
-    def __init__(self, bert_model_name='bert-base-uncased'):
+    def __init__(self, bert_model_name='bert-base-uncased', model_dir=None):
         super(ProtoNet, self).__init__()
-        self.encoder = BertModel.from_pretrained(bert_model_name)
+        self.encoder = BertModel.from_pretrained(bert_model_name, cache_dir=model_dir)
     
     def forward(self, xb):
         xs, xq = xb

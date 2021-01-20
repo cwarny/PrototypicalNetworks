@@ -17,6 +17,7 @@ train:
 model:
   encoder:
     model_name: 'bert-base-uncased'
+    model_dir: null
   weight_decay: 0.
 
 cuda: False
