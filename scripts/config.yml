@@ -20,4 +20,4 @@ model:
     model_dir: null
   weight_decay: 0.
 
-cuda: False
+cuda: True

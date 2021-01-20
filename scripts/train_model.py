@@ -54,7 +54,7 @@ def train_model(config):
     train_config = config['train']
     episode_config = train_config['episode']
     tokenizer = BertTokenizer.from_pretrained(model_config['encoder']['model_name'], 
-        model_dir=model_config['encoder']['model_dir'])
+        cache_dir=model_config['encoder']['model_dir'])
 
     def load(path):
         df = read_tsv(path, names=['intent', 'text', 'ner'])
@@ -86,7 +86,8 @@ def train_model(config):
         Schedule(optim_config['decay_every'])
     ]
 
-    model = ProtoNet(bert_model_name=model_config['encoder']['model_name'])
+    model = ProtoNet(bert_model_name=model_config['encoder']['model_name'], 
+        model_dir=model_config['encoder']['model_dir'])
 
     opt_func = partial(optim.Adam, 
         lr=optim_config['learning_rate'], 
