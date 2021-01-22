@@ -84,7 +84,7 @@ class Meter:
         else: return [float('nan') for o in self.all_meters]
 
     def accumulate(self, learner):
-        batch_size = learner.yb.size(0)
+        batch_size = learner.yb.numel()
         self.tot_loss += learner.loss * batch_size
         self.count += batch_size
         for i,metric in enumerate(self.metrics):
@@ -143,7 +143,7 @@ class Measure(Callback):
         stats = {'epoch': self.epoch, 'train':{}, 'valid':{}}
         for m in [self.train_meter, self.valid_meter]:
             split = 'train' if m.in_train else 'valid'
-            for metric,value in zip(m.metrics, m.avg_meters):
+            for metric,value in zip(['loss']+m.metrics, m.avg_meters):
                 stats[split][metric.__name__] = f"{value:.6f}"
         self.logger(stats)
 
