@@ -204,6 +204,7 @@ class Learner:
             self('after_backward')
             self.opt.step()
             self('after_step')
+            self.opt.zero_grad()
         except CancelBatchException:
             self('after_cancel_batch')
         finally:

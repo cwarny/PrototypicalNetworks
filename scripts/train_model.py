@@ -53,8 +53,9 @@ def train_model(config):
     model_config = config['model']
     train_config = config['train']
     episode_config = train_config['episode']
-    tokenizer = BertTokenizer.from_pretrained(model_config['encoder']['model_name'], 
-        cache_dir=model_config['encoder']['model_dir'])
+    encoder_config = model_config['encoder']
+    tokenizer = BertTokenizer.from_pretrained(encoder_config['model_name'], 
+        cache_dir=encoder_config['model_dir'])
 
     def load(path):
         df = read_tsv(path, names=['intent', 'text', 'ner'])
@@ -69,6 +70,7 @@ def train_model(config):
         # `data_per_class` is a cache of the data 
         # grouped by class name
         classes = list(data_per_class.keys())
+        assert episode_config['classification_cardinality'] <= len(classes)
         return load_data(classes, data_per_class, tokenizer, 
             episodes, episode_config)
     
@@ -86,8 +88,8 @@ def train_model(config):
         Schedule(optim_config['decay_every'])
     ]
 
-    model = ProtoNet(bert_model_name=model_config['encoder']['model_name'], 
-        model_dir=model_config['encoder']['model_dir'])
+    model = ProtoNet(bert_model_name=encoder_config['model_name'], 
+        model_dir=encoder_config['model_dir'])
 
     opt_func = partial(optim.Adam, 
         lr=optim_config['learning_rate'], 

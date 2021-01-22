@@ -17,6 +17,8 @@ This technique is useful when we have very limited training data.
 
 ## Setup
 
+* `source activate pytorch_p36`
+* `cd <this repo>`
 * `python setup.py install`
 * `pip install -r requirements.txt`
 
@@ -29,7 +31,7 @@ This technique is useful when we have very limited training data.
 ## Train model
 
 * `/apollo/env/HoverboardDefaultMLPS3Tool/bin/mlps3 cp -r s3://blu-core-model-training-eu/snl/models/huggingface ~/.cache`
-* If necessary, update the key *model > encoder > model_dir* in the config file: `emacs <yaml config file>`
+* Updated config file: `emacs <yaml config file>`
 * `python scripts/train_model.py -c <yaml config file>`
 
 ## Run tests

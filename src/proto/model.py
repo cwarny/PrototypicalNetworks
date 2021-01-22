@@ -11,7 +11,6 @@ class ProtoNet(nn.Module):
     def forward(self, xb):
         xs, xq = xb
         n_class = xs.size(0)
-        assert n_class == xq.size(0)
         n_support = xs.size(1)
         n_query = xq.size(1)
         # Concat support and query vectors so we can
@@ -23,7 +22,7 @@ class ProtoNet(nn.Module):
         ], 0)
         z = self.encoder(x).pooler_output
         z_dim = z.size(-1)
-        # Repartition support and query vectors and take
+        # Re-partition support and query vectors and take
         # the mean of support vectors to get the prototypes
         z_proto = z[:n_class*n_support] \
             .view(n_class, n_support, z_dim).mean(1)
