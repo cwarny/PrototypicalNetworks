@@ -85,7 +85,7 @@ class Meter:
 
     def accumulate(self, learner):
         batch_size = learner.yb.numel()
-        self.tot_loss += learner.loss * batch_size
+        self.tot_loss += learner.loss.item() * batch_size
         self.count += batch_size
         for i,metric in enumerate(self.metrics):
             self.tot_mets[i] += metric(learner.out, learner.yb)*batch_size
@@ -143,7 +143,7 @@ class Measure(Callback):
         stats = {'epoch': self.epoch, 'train':{}, 'valid':{}}
         for m in [self.train_meter, self.valid_meter]:
             split = 'train' if m.in_train else 'valid'
-            for metric,value in zip(['loss']+m.metrics, m.avg_meters):
+            for metric,value in zip([self.loss_func]+m.metrics, m.avg_meters):
                 stats[split][metric.__name__] = f"{value:.6f}"
         self.logger(stats)
 
@@ -156,7 +156,7 @@ class Schedule(Callback):
         self.learner.scheduler = lr_scheduler.StepLR(self.opt, 
             self.decay_every, gamma=0.5)
 
-    def after_step(self):
+    def after_epoch(self):
         self.scheduler.step()
 
 class Learner:

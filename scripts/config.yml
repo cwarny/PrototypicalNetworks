@@ -5,7 +5,7 @@ data:
 
 train:
   epochs: 10000
-  episodes: 100
+  episodes: 5
   episode:
     classification_cardinality: 10 # number of classes per episode
     shots: 5 # the number of labelled samples per class ("support vectors")
