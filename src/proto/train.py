@@ -1,6 +1,6 @@
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
-from proto.util import listify, dict_logger
+from proto.util import listify, dict_logger, save_weights
 
 class CancelTrainException(Exception):
     pass
@@ -84,7 +84,7 @@ class Meter:
         else: return [float('nan') for o in self.all_meters]
 
     def accumulate(self, learner):
-        batch_size = learner.yb.numel()
+        batch_size = learner.yb[0].numel()
         self.tot_loss += learner.loss.item() * batch_size
         self.count += batch_size
         for i,metric in enumerate(self.metrics):
@@ -117,7 +117,7 @@ class StopEarly(Callback):
                 if self.avg_loss_curr < self.avg_loss_best:
                     self.avg_loss_best = self.avg_loss_curr
                     if self.save_model_path:
-                        torch.save(self.model.state_dict(), self.save_model_path)
+                        save_weights(self.model, self.save_model_path)
             else: 
                 # loss got worse
                 self.frustration += 1
@@ -159,6 +159,25 @@ class Schedule(Callback):
     def after_epoch(self):
         self.scheduler.step()
 
+def loss(out, yb):
+    '''
+    `out` has shape (n_class*n_query, n_class)
+    There are `n_query*n_class` total query vectors
+    and therefore a total of `n_query*n_class*n_class` 
+    (logsoftmaxed) distances: each query vector has 
+    a distance to each prototype, and one of these 
+    distances is the distance to the true class. 
+    Learning proceeds by minimizing the logsoftmaxed 
+    distance to the true class. The distance to 
+    the true class of the i-th query vector for the 
+    j-th class corresponds to out[j*i,j], so we use 
+    the `gather` method to get us a tensor of shape 
+    (n_class*n_query) of the distances to the true 
+    class for each vector in each class.
+    '''
+    loss = -out.gather(-1, yb[0]).mean()
+    return loss
+
 class Learner:
     ALL_CBS = {
         'begin_fit',
@@ -188,7 +207,7 @@ class Learner:
         self.loss_func = loss_func
         self.opt_func, self.opt = opt_func, None
         self.in_train = False
-        self.callbacks = [TrainEval()] + (callbacks or [])
+        self.callbacks = [TrainEval()] + listify(callbacks)
     
     def one_batch(self, i, xb, yb):
         try:

@@ -1,13 +1,11 @@
 data:
-  data_dir: 'data/mini'
-  train_path: 'train.tsv'
-  valid_path: 'valid.tsv'
+  data_dir: 'data/meta'
 
 train:
   epochs: 10000
   episodes: 5
   episode:
-    classification_cardinality: 10 # number of classes per episode
+    task_cardinality: 10 # number of classes per task
     shots: 5 # the number of labelled samples per class ("support vectors")
     queries: 5 # the number of unlabelled samples per class ("query vectors"); they need to be classified in the right class
   optimization:
@@ -17,7 +15,8 @@ train:
 model:
   encoder:
     model_name: 'bert-base-uncased'
-    model_dir: null
+    save_dir: null
   weight_decay: 0.
+  save_dir: null
 
 cuda: True

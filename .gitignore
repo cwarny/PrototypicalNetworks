@@ -1,4 +1,5 @@
 data
+model
 dist
 build
 __pycache__

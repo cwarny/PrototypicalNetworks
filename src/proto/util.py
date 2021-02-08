@@ -1,7 +1,10 @@
+import yaml
 import json
 import functools
+from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 from typing import Iterable
+import torch
 
 def compose(functions):
     return functools.reduce(lambda f, g: lambda x: g(f(x)), functions, lambda x: x)
@@ -26,3 +29,26 @@ def parallel(func, arr, max_workers=4):
 
 def dict_logger(x):
     print(json.dumps(x, indent=4))
+
+def safe_save_path(fp):
+    fp = Path(fp)
+    if not fp.parent.exists():
+        fp.parent.mkdir(parents=True)
+
+def save_weights(model, fp):
+    safe_save_path(fp)
+    torch.save(model.state_dict(), fp)
+
+def load_weights(model, fp):
+    model.load_state_dict(torch.load(fp))
+    return model
+
+def load_config(fp):
+    with open(fp) as infile:
+        config = yaml.safe_load(infile)
+    return config
+
+def save_config(config, fp):
+    safe_save_path(fp)
+    with open(fp, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False)

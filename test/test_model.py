@@ -13,7 +13,6 @@ def test_model():
     xq = torch.randint(vocab_size, (n_class, n_query, max_len))
     xb = (xs,xq)
     out = model(xb)
-    assert len(out.shape) == 3
-    assert out.size(0) == n_class
-    assert out.size(1) == n_query
-    assert out.size(2) == n_class
+    assert len(out.shape) == 2
+    assert out.size(0) == n_class*n_query
+    assert out.size(1) == n_class

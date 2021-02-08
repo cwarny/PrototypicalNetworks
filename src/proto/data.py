@@ -1,5 +1,5 @@
 import random
-from functools import partial
+from functools import partial, reduce
 from pathlib import Path
 from collections import Counter, defaultdict
 import itertools
@@ -9,18 +9,64 @@ from torch import LongTensor
 from torch.utils.data import Dataset, DataLoader
 from .util import compose, parallel
 
-class ListDataset(Dataset):
-    def __init__(self, lst, load=lambda x: x, path=None):
-        super(ListDataset, self).__init__()
-        self.lst = lst
-        self.load = load
+def read_tsv(*args, converters=None, **kwargs):
+    df = pd.read_csv(*args, **kwargs, sep='\t')
+    if converters:
+        assert isinstance(converters, dict)
+        for k,converter in converters.items():
+            df[k] = df.apply(converter, 1)
+    return df
 
-    def __len__(self):
-        return len(self.lst)
-
+class ClassDataset(Dataset):
+    def __init__(self, df, tokenizer, n_support=-1, n_query=0):
+        super(ClassDataset, self).__init__()
+        self.n_support = n_support
+        self.n_query = n_query
+        self.grouped = list(df.groupby('class'))
+        for k,g in self.grouped:
+            assert len(g) >= n_support+n_query, ('You requested '
+            f'{n_support} supports and {n_query} queries per class '
+            f'but class {k} only has {len(g)} samples.')
+        self.tokenizer = tokenizer
+    
+    @classmethod
+    def from_tsv(cls, fp, *args, names=None, converters=None, **kwargs):
+        df = read_tsv(fp, names=names, converters=converters)
+        return cls(df, *args, **kwargs)
+    
     def __getitem__(self, i):
-        return self.load(self.lst[i])
+        if self.n_support == -1: # return all samples as supports
+            samples = self.grouped[i][1]
+            samples = samples['text'].tolist()
+            tokenized = self.tokenizer(samples)
+            return tokenized, [[]]
+        n = self.n_support + self.n_query
+        samples = self.grouped[i][1].sample(n)
+        samples = samples['text'].tolist()
+        tokenized = self.tokenizer(samples)
+        supports = tokenized[:self.n_support]
+        queries = tokenized[self.n_support:]
+        # i is the index of the class
+        return supports, queries, [i]*len(queries)
+    
+    def __len__(self):
+        return len(self.grouped)
 
+class TabularDataset(Dataset):
+    def __init__(self, df):
+        super(TabularDataset, self).__init__()
+        self.df = df
+    
+    @classmethod
+    def from_tsv(cls, *args, **kwargs):
+        return cls(read_tsv(*args, **kwargs))
+    
+    def __getitem__(self, i):
+        return self.df.loc[i]
+    
+    def __len__(self):
+        return len(self.df)
+    
 class TransformDataset(Dataset):
     def __init__(self, dataset, transforms):
         super(TransformDataset, self).__init__()
@@ -44,130 +90,10 @@ class TransformDataset(Dataset):
             sample = self.transforms(sample)
         return sample
 
-class Processor:
-    def __init__(self, chunksize=-1, max_workers=1):
-        self.chunksize = chunksize
-        self.max_workers = max_workers
-
-    def __call__(self, items):
-        if self.chunksize == -1:
-            chunks = [items]
-        else:
-            chunks = [
-                items[i:i+self.chunksize] 
-                for i in range(0, len(items), self.chunksize)
-            ]
-        toks = parallel(self.proc_chunk, chunks, self.max_workers)
-        # `toks` is a list of lists of lists of tokens
-        # we want a list of lists of tokens instead
-        # so here's a sneaky and efficient way to flatten 
-        # a list of lists
-        return list(itertools.chain.from_iterable(toks))
-    
-    def proc_chunk(self, args):
-        _,chunk = args
-        return self.process(chunk)
-
-    def proc1(self, item):
-        return item
-    
-    def process(self, items): 
-        return [self.proc1(item) for item in items]
-
-class TokenizeProcessor(Processor):
-    def __init__(self, tokenizer, *args, **kwargs):
-        super(TokenizeProcessor, self).__init__()
-        self.tokenizer = tokenizer
-    
-    def proc1(self, text):
-        return self.tokenizer(text)
-
-class NumericalizeProcessor(Processor):
-    def __init__(self, unk, pad, *args, ids_to_tokens=None, 
-            max_vocab=60000, min_freq=2, **kwargs):
-        super(NumericalizeProcessor, self).__init__(*args, **kwargs)
-        assert isinstance(unk,tuple) and len(unk)==2 \
-            and isinstance(unk[0],str) and isinstance(unk[1],int)
-        assert isinstance(pad,tuple) and len(pad)==2 \
-            and isinstance(pad[0],str) and isinstance(pad[1],int)
-        self.ids_to_tokens = ids_to_tokens
-        self.max_vocab = max_vocab
-        self.min_freq = min_freq
-        self.unk, self.pad = unk, pad
-        self.special_tokens = [unk, pad]
-    
-    def __call__(self, items):
-        if self.ids_to_tokens is None:
-            freq = Counter(tok for text in items for tok in text)
-            self.ids_to_tokens = [
-                tok for tok,c in freq.most_common(self.max_vocab) 
-                if c >= self.min_freq
-            ]
-            for tok,idx in sorted(self.special_tokens, key=lambda d:d[1]):
-                if tok in self.ids_to_tokens: self.ids_to_tokens.remove(tok)
-                self.ids_to_tokens.insert(idx, tok)
-        if getattr(self, 'tokens_to_ids', None) is None:
-            self.tokens_to_ids = defaultdict(lambda: self.unk[1], {
-                v:k for k,v in enumerate(self.ids_to_tokens)
-            })
-        return super(NumericalizeProcessor, self).__call__(items)
-    
-    def proc1(self, tokens):
-        return [self.tokens_to_ids[tok] for tok in tokens]
-
-class CategorizeProcessor(Processor):
-    def __init__(self, *args, unk=None, ids_to_categories=None, 
-            max_vocab=60000, min_freq=0, **kwargs):
-        super(CategorizeProcessor, self).__init__(*args, **kwargs)
-        unk = unk or ('<unk>',0)
-        assert isinstance(unk,tuple) and len(unk)==2 \
-            and isinstance(unk[0],str) and isinstance(unk[1],int)
-        self.ids_to_categories = ids_to_categories
-        self.max_vocab = max_vocab
-        self.min_freq = min_freq
-        self.unk = unk
-        self.special_categories = [unk]
-    
-    def __call__(self, items):
-        if self.ids_to_categories is None:
-            freq = Counter(items)
-            self.ids_to_categories = [o for o,c in freq.most_common() 
-                if c >= self.min_freq]
-            for cat,idx in sorted(self.special_categories, key=lambda d:d[1]):
-                if cat in self.ids_to_categories: self.ids_to_categories.remove(cat)
-                self.ids_to_categories.insert(idx, cat)
-        if getattr(self, 'categories_to_ids', None) is None:
-            self.categories_to_ids  = defaultdict(lambda: self.unk[1], {
-                v:k for k,v in enumerate(self.ids_to_categories)
-            })
-        return super(CategorizeProcessor, self).__call__(items)
-    
-    def proc1(self, category):
-        return self.categories_to_ids[category]
-
-class EpisodicBatchSampler:
-    '''
-    This sampler generates "episodes" by sampling 
-    `classification_cardinality` classes from the `n_classes` 
-    possible classes. It will do that for `n_episodes` 
-    "episodes".
-    An epoch of training is therefore composed of `n_episodes`
-    "training episodes".
-    This is slightly different from the concept of an epoch 
-    in typical model training. 
-    Typically, an epoch just means going through your dataset 
-    once. Here, because of the peculiarities of the prototypical
-    network approach, we define an epoch as a series of 
-    episodes where, for each episode, we randomly pick a
-    `classification_cardinality` classes. 
-    In each episode, the model will try to do a 
-    `classification_cardinality`-way classification of a set of 
-    unlabelled "query vectors" based on a set of labelled 
-    "support vectors".
-    '''
-    def __init__(self, n_classes, classification_cardinality, n_episodes):
-        self.n_classes = n_classes
-        self.classification_cardinality = classification_cardinality
+class TaskSampler:
+    def __init__(self, n_class, cardinality, n_episodes):
+        self.n_class = n_class
+        self.cardinality = cardinality
         self.n_episodes = n_episodes
 
     def __len__(self):
@@ -175,16 +101,17 @@ class EpisodicBatchSampler:
 
     def __iter__(self):
         for _ in range(self.n_episodes):
-            yield torch.randperm(self.n_classes)[:self.classification_cardinality]
+            yield torch.randperm(self.n_class)[:self.cardinality]
 
 def collate(pad_idx, samples):
-    xs, xq = [],[]
+    xs, xq, ys = [],[],[]
     max_len = 0
     n_class = 0
-    for ds,dq in samples:
+    for ds,dq,y in samples:
         n_class += 1
         xs.append(ds)
         xq.append(dq)
+        ys.append(y)
         for d in ds+dq: max_len = max(max_len, len(d))
     def pad(data):
         n_examples = len(data[0])
@@ -197,37 +124,21 @@ def collate(pad_idx, samples):
     xs,xq = pad(xs),pad(xq)
     xb = xs,xq
     n_query = xq.size(1)
-    yb = torch.arange(0,n_class) \
+    idx = torch.arange(0,n_class) \
         .view(n_class,1,1) \
-        .expand(n_class,n_query,1).long()
+        .expand(n_class,n_query,1).long() \
+        .contiguous() \
+        .view(n_class*n_query,-1)
+    yb = idx,LongTensor(ys)
     return xb,yb
 
-def read_tsv(*args, converters=None, **kwargs):
-    df = pd.read_csv(*args, **kwargs, sep='\t')
-    if converters:
-        assert isinstance(converters, dict)
-        for k,converter in converters.items():
-            df[k] = df.apply(converter, 1)
-    return df
-
-def load_data(classes, data_per_class, tokenizer, n_episodes, episode_config):
-    assert isinstance(episode_config, dict)
-    def load_utterance_data(x): return data_per_class[x]
-    def extract_episode(x):
-        examples = random.sample(x, episode_config['shots']+episode_config['queries'])
-        return examples[:episode_config['shots']], examples[episode_config['shots']:]
-    def tokenize(x):
-        return map(lambda d: tokenizer(d)['input_ids'], x)
-    transforms = compose([
-        load_utterance_data,
-        extract_episode,
-        tokenize
-    ])
-    ds = TransformDataset(ListDataset(classes), transforms)
-    sampler = EpisodicBatchSampler(len(ds), 
-        episode_config['classification_cardinality'], n_episodes)
-    return DataLoader(ds, batch_sampler=sampler, 
-        collate_fn=partial(collate, tokenizer.pad_token_id))
+def get_dl(fp, tokenizer, n_way, n_episodes, pad_token_id=0, 
+        n_support=-1, n_query=0):
+    ds = ClassDataset.from_tsv(fp, tokenizer, names=['task','class','text'], 
+        n_support=n_support, n_query=n_query)
+    sampler = TaskSampler(len(ds), n_way, n_episodes)
+    collate_fn = partial(collate, pad_token_id)
+    return DataLoader(ds, batch_sampler=sampler, collate_fn=collate_fn)
 
 class DataBunch:
     def __init__(self, train_dl, valid_dl):
@@ -240,9 +151,8 @@ class DataBunch:
     def valid_ds(self): return self.valid_dl.dataset
     
     @classmethod
-    def from_data_dir(cls, data_dir, relative_train_path, 
-            relative_valid_path, load_func=lambda x: x):
+    def from_data_dir(cls, data_dir, *args, **kwargs):
         data_dir = Path(data_dir)
-        train_dl = load_func(data_dir/relative_train_path)
-        valid_dl = load_func(data_dir/relative_valid_path)
+        train_dl = get_dl(data_dir/'train.tsv', *args, **kwargs)
+        valid_dl = get_dl(data_dir/'valid.tsv', *args, **kwargs)
         return cls(train_dl, valid_dl)

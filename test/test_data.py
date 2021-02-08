@@ -3,81 +3,54 @@ import argparse
 from pathlib import Path
 import torch
 from transformers import BertTokenizer
-from proto.data import load_data, read_tsv, DataBunch
+from proto.data import get_dl, DataBunch
 
-config = {
-    'data': {
-        'data_dir': 'data',
-        'train_path': 'train.tsv',
-        'valid_path': 'valid.tsv'
-    },
-    'train': {
-        'episode': {
-            'classification_cardinality': 3,
-            'shots': 5,
-            'queries': 6
-        },
-        'episodes': 4,
-    },
-    'model': {
-        'encoder': {
-            'model_name': 'bert-base-uncased'
-        }
-    }
-}
+data_dir = Path('data/meta')
+n_way = 3
+n_support = 5
+n_query = 6
+n_episodes = 4
+encoder_name = 'bert-base-uncased'
 
 @pytest.fixture(scope="module")
 def tokenizer_fixt():
-    tokenizer = BertTokenizer.from_pretrained(config['model']['encoder']['model_name'])
+    tokenizer = BertTokenizer.from_pretrained(encoder_name)
     return tokenizer
 
 @pytest.fixture(scope="module")
-def data_per_class_fixt():
-    data_dir = Path(config['data']['data_dir'])
-    train_path = config['data']['train_path']
-    df = read_tsv(data_dir/train_path, 
-        names=['intent', 'text', 'ner'], nrows=1000)
-    shots = config['train']['episode']['shots']
-    queries = config['train']['episode']['queries']
-    data_per_class = {
-        k: g['text'].tolist() for k,g in df.groupby('intent')
-        if len(g) >= shots+queries
-    }
-    return data_per_class
+def data_fixt(tokenizer_fixt):
+    tok = lambda x: tokenizer_fixt(x)['input_ids']
+    pad_token_id = tokenizer_fixt.pad_token_id
+    dl = get_dl(data_dir/'train.tsv', tok, n_way, 
+        n_episodes, pad_token_id=pad_token_id, 
+        n_support=n_support, n_query=n_query)
+    return dl
 
-def test_load_data(data_per_class_fixt, tokenizer_fixt):
-    classes = list(data_per_class_fixt.keys())
-    episodes = config['train']['episodes']
-    episode_config = config['train']['episode']
-    dl = load_data(classes, data_per_class_fixt, tokenizer_fixt, 
-        episodes, episode_config)
-    assert len(dl) == episodes
-    for xb,yb in dl: break # load one batch
+def test_load_data(data_fixt):
+    assert len(data_fixt) == n_episodes
+    for xb,yb in data_fixt: break # load one batch
     # input batch has both support and query vectors
     assert isinstance(xb, tuple) and len(xb) == 2
+    assert isinstance(yb, tuple) and len(yb) == 2
     xs,xq = xb
+    idx,yb = yb
     assert isinstance(xs, torch.Tensor)
     assert isinstance(xq, torch.Tensor)
+    assert isinstance(idx, torch.Tensor)
     assert isinstance(yb, torch.Tensor)
     assert xs.size(0) == xq.size(0), \
         'support and query seqs should have the same number of classes'
-    assert xq.size(0) == episode_config['classification_cardinality']
-    assert xs.size(1) == episode_config['shots']
-    assert xq.size(1) == episode_config['queries']
+    assert xq.size(0) == n_way
+    assert xs.size(1) == n_support
+    assert xq.size(1) == n_query
     assert xs.size(2) == xq.size(2), \
         'support and query seqs should be padded to the same length'
 
-def test_databunch_instantiation(data_per_class_fixt, tokenizer_fixt):
-    episodes = config['train']['episodes']
-    episode_config = config['train']['episode']
-    def load(path):
-        classes = list(data_per_class_fixt.keys())
-        return load_data(classes, data_per_class_fixt, 
-            tokenizer_fixt, episodes, episode_config)
-    data_dir = Path(config['data']['data_dir'])
-    train_path = config['data']['train_path']
-    valid_path = config['data']['valid_path']
-    data = DataBunch.from_data_dir(data_dir, train_path, 
-        valid_path, load_func=load)
+def test_databunch_instantiation(tokenizer_fixt):
+    tok = lambda x: tokenizer_fixt(x)['input_ids']
+    pad_token_id = tokenizer_fixt.pad_token_id
+    data = DataBunch.from_data_dir(data_dir, tok, n_way, 
+        n_episodes, n_support=n_support, n_query=n_query, 
+        pad_token_id=pad_token_id)
     assert hasattr(data, 'train_dl')
     assert hasattr(data, 'valid_dl')

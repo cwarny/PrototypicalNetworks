@@ -1,21 +1,28 @@
 import argparse
 from pathlib import Path
 from sklearn.model_selection import train_test_split
+import numpy as np
 from proto.data import read_tsv
+
+np.random.seed(0)
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir', type=str)
     parser.add_argument('--input', type=str)
-    parser.add_argument('--train', type=str, default='train.tsv')
-    parser.add_argument('--valid', type=str, default='valid.tsv')
-    parser.add_argument('--test', type=str, default='test.tsv')
+    parser.add_argument('--disjoint', 
+        help=('ensure meta-test tasks are not seen '
+            'during meta-traininig'), 
+        action='store_true')
+    parser.add_argument('--min-samples', type=int, default=30,
+        help='min number of samples per class')
     return parser.parse_args()
 
 def main(args):
     data_dir = Path(args.data_dir)
+
     converters = {
-        'intent': lambda row: '.'.join([row['domain'],row['intent']]),
+        'class': lambda row: '.'.join([row['task'],row['class']]),
         'text': lambda row: ' '.join([
             item.split('|')[0] 
             for item in row['annotation'].split(' ')
@@ -25,15 +32,48 @@ def main(args):
             for item in row['annotation'].split(' ')
         ])
     }
-    df = read_tsv(data_dir/args.input, names=['domain', 'intent', 'annotation'], 
-        converters=converters)
-    train, test = train_test_split(df, train_size=.8, stratify=df.intent)
-    train, valid = train_test_split(train, train_size=.8, stratify=train.intent)
-    splits = {'train':train, 'valid':valid, 'test':test}
-    for name,split in splits.items():
-        path = getattr(args, name)
-        split.to_csv(data_dir/path, sep='\t', index=False, 
-            header=None, columns=['intent', 'text','ner'])
+    df = read_tsv(data_dir/args.input, 
+            names=['task', 'class', 'annotation'], 
+            converters=converters) \
+        .groupby('class') \
+        .filter(lambda g: len(g)>=args.min_samples)
+    
+    # Split tasks into meta-training and meta-testing
+    if args.disjoint:
+        train_tasks, test_tasks = train_test_split(
+            df['task'].unique(), train_size=.8)
+        meta_train = df[df['task'].isin(train_tasks)]
+        meta_test = df[df['task'].isin(test_tasks)]
+    else:
+        meta_train, meta_test = train_test_split(df, 
+            train_size=.8, stratify=df['task'])
+
+    # split meta-train data into meta-train and meta-valid
+    meta_train, meta_valid = train_test_split(meta_train, 
+        train_size=.8, stratify=meta_train['class'])
+    # split meta-test data into train and test
+    train, test = train_test_split(meta_test, 
+        train_size=.5, stratify=meta_test['class'])
+    
+    meta_dir = data_dir/'meta'
+    tasks_dir = data_dir/'tasks'
+    if not meta_dir.exists(): meta_dir.mkdir()
+    if not tasks_dir.exists(): tasks_dir.mkdir()
+    
+    splits = {'train': meta_train, 'valid': meta_valid}
+    for split_name,split in splits.items():
+        path = meta_dir/'{}.tsv'.format(split_name)
+        split.to_csv(path, sep='\t', index=False, 
+            header=None, columns=['task','class','text'])
+    
+    splits = {'train': train, 'test': test}
+    for split_name,split in splits.items():
+        for k,g in split.groupby('task'):
+            d = tasks_dir/k
+            if not d.exists(): d.mkdir()
+            g.to_csv(d/'{}.tsv'.format(split_name), 
+                sep='\t', index=False, header=None,
+                columns=['task','class','text'])
 
 if __name__ == '__main__':
     args = parse_args()

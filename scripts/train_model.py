@@ -1,106 +1,72 @@
 import argparse
+from pathlib import Path
 import yaml
 from functools import partial
 import torch
 import torch.optim as optim
 from transformers import BertTokenizer
-from proto.data import DataBunch, read_tsv, load_data
+from proto.data import DataBunch
 from proto.train import (Learner, StopEarly, Measure,
-    Schedule, SetDevice)
+    Schedule, SetDevice, loss)
 from proto.model import ProtoNet
+from proto.util import load_config, save_config
+from proto.metric import accuracy
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', type=str, required=True)
     return parser.parse_args()
 
-def parse_config(path):
-    with open(path) as infile:
-        config = yaml.safe_load(infile)
-    return config
-
-def loss(out, yb):
-    '''
-    `out` has shape (n_class, n_query, n_class)
-    There are `n_query*n_class` total query vectors
-    and therefore a total of `n_query*n_class*n_class` 
-    (logsoftmaxed) distances: each query vector has 
-    a distance to each `n_class` prototype, 
-    and one of these distances is the distance to 
-    the true class. Learning proceeds by minimizing 
-    the logsoftmaxed distance to the true class.
-    The distance to the true class of the i-th 
-    query vector for the j-th class corresponds to 
-    out[j,i,j], so we use the `gather` method
-    to get us a tensor of shape (n_class, n_query)
-    of the distances to the true class for each
-    `n_query` vector in each class.
-    '''
-    loss = -out.gather(-1, yb).mean()
-    return loss
-    
-def accuracy(out, yb):
-    '''
-    Get the "predicted class" by retrieving the
-    minimum distance (max negative distance) for
-    each query vector
-    '''
-    _, y_hat = out.max(-1)
-    return torch.eq(y_hat, yb.squeeze()).float().mean()
-
 def train_model(config):
-    data_config = config['data']
-    model_config = config['model']
-    train_config = config['train']
-    episode_config = train_config['episode']
-    encoder_config = model_config['encoder']
-    tokenizer = BertTokenizer.from_pretrained(encoder_config['model_name'], 
-        cache_dir=encoder_config['model_dir'])
+    device = config['device']
+    encoder_name = config['model']['encoder']['model_name']
+    encoder_dir = config['model']['encoder']['save_dir']
+    model_dir = config['model']['save_dir']
+    n_way = config['train']['episode']['task_cardinality']
+    n_episodes = config['train']['episodes']
+    n_epochs = config['train']['epochs']
+    n_support = config['train']['episode']['shots']
+    n_query = config['train']['episode']['queries']
+    data_dir = config['data']['data_dir']
+    decay_every = config['train']['optimization']['decay_every']
+    learning_rate = config['train']['optimization']['learning_rate']
+    weight_decay = config['model']['weight_decay']
 
-    def load(path):
-        df = read_tsv(path, names=['intent', 'text', 'ner'])
-        shots = episode_config['shots']
-        queries = episode_config['queries']
-        episodes = train_config['episodes']
-        data_per_class = {
-            k: g['text'].tolist() for k,g in df.groupby('intent')
-            if len(g) >= shots+queries 
-            # class needs to have at least `shots+queries` utterances
-        }
-        # `data_per_class` is a cache of the data 
-        # grouped by class name
-        classes = list(data_per_class.keys())
-        assert episode_config['classification_cardinality'] <= len(classes)
-        return load_data(classes, data_per_class, tokenizer, 
-            episodes, episode_config)
+    if model_dir:
+        save_config(config['model'], Path(model_dir)/'config.yml')
+
+    tokenizer = BertTokenizer.from_pretrained(encoder_name, 
+        cache_dir=encoder_dir)
+    tok = lambda x: tokenizer(x)['input_ids']
+    pad_token_id = tokenizer.pad_token_id
+
+    data = DataBunch.from_data_dir(data_dir, tok, n_way, 
+        n_episodes, n_support=n_support, n_query=n_query, 
+        pad_token_id=pad_token_id)
     
-    data_dir = data_config['data_dir']
-    train_path = data_config['train_path']
-    valid_path = data_config['valid_path']
-    data = DataBunch.from_data_dir(data_dir, train_path, 
-        valid_path, load_func=load)
-
-    optim_config = train_config['optimization']
+    if model_dir:
+        stop_early = StopEarly(
+            save_model_path=Path(model_dir)/'model.pt')
+    else:
+        stop_early = StopEarly()
     callbacks = [
         Measure(accuracy),
-        SetDevice(config['device']),
-        StopEarly(),
-        Schedule(optim_config['decay_every'])
+        SetDevice(device),
+        stop_early,
+        Schedule(decay_every)
     ]
 
-    model = ProtoNet(bert_model_name=encoder_config['model_name'], 
-        model_dir=encoder_config['model_dir'])
-
-    opt_func = partial(optim.Adam, 
-        lr=optim_config['learning_rate'], 
-        weight_decay=model_config['weight_decay'])
-    
-    learner = Learner(model, data, loss, opt_func, callbacks=callbacks)
-    learner.fit(train_config['epochs'])
+    model = ProtoNet(encoder_model_name=encoder_name, 
+        encoder_dir=encoder_dir)
+    opt_func = partial(optim.Adam, lr=learning_rate, 
+        weight_decay=weight_decay)
+    learner = Learner(model, data, loss, opt_func, 
+        callbacks=callbacks)
+    learner.fit(n_epochs)
 
 if __name__ == '__main__':
     args = parse_args()
-    config = parse_config(args.config)
+    config = load_config(args.config)
     torch.manual_seed(0)
     if torch.cuda.is_available() and config['cuda']:
         config['device'] = torch.device('cuda')
