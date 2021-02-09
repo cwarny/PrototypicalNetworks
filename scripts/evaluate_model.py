@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import BertTokenizer
 from proto.data import (ClassDataset, TabularDataset, 
-    TransformDataset, collate)
+    TransformDataset, CategorizeProcessor, collate)
 from proto.model import ProtoNet
 from proto.util import load_weights, compose, dict_logger
 from proto.metric import accuracy
@@ -47,18 +47,28 @@ def evaluate_model(
     # "train"
     for xb,yb in train_dl:
         xs,xq = xb
-        z_proto = model.encode(xs)
+        n_class = xs.size(0)
+        n_support = xs.size(1)
+        xs = xs.view(n_class*n_support, -1)
+        z_proto = model.encode(xs) \
+            .view(n_class, n_support, -1) \
+            .mean(1)
         # there will only be a single iteration
         # of this loop
 
     # test
     test_ds = TabularDataset.from_tsv(tp/'test.tsv', 
         names=['task','class','text'])
-    # the second transform is because collate function 
-    # expects 2-uple of lists of lists where first
-    # list is supports, and second list is queries
-    transforms = compose([tok, lambda x: ([[]],x)])
-    test_ds = TransformDataset(test_ds, transforms)
+    categorize = CategorizeProcessor()
+    _ = categorize(test_ds.df['class']) # learn mapping
+    def transform(d):
+        x,y = d
+        return (
+            [], # support samples
+            [tok(x)], # queries
+            categorize([y]) # target
+        )
+    test_ds = TransformDataset(test_ds, transform)
     bs = batch_size
     test_dl = DataLoader(test_ds, batch_size=bs, 
         collate_fn=collate_fn)
@@ -68,13 +78,14 @@ def evaluate_model(
     for xb,yb in test_dl:
         c += bs
         xs,xq = xb
-        zq = model.encode(xq)
+        zq = model.encode(xq.squeeze(1))
         out = model.compute_distances(zq, z_proto)
-        acc += accuracy(out, yb[1])*bs
+        yb = yb[::-1]
+        acc += accuracy(out, yb[1]).item()*bs
 
     dict_logger({
         'task': tp.name,
-        'accuracy': acc/c
+        'accuracy': f"{acc/c:.6f}"
     })
 
 if __name__ == '__main__':

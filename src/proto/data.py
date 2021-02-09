@@ -39,7 +39,7 @@ class ClassDataset(Dataset):
             samples = self.grouped[i][1]
             samples = samples['text'].tolist()
             tokenized = self.tokenizer(samples)
-            return tokenized, [[]]
+            return tokenized, [], []
         n = self.n_support + self.n_query
         samples = self.grouped[i][1].sample(n)
         samples = samples['text'].tolist()
@@ -62,7 +62,10 @@ class TabularDataset(Dataset):
         return cls(read_tsv(*args, **kwargs))
     
     def __getitem__(self, i):
-        return self.df.loc[i]
+        return (
+            self.df.iloc[i]['text'],
+            self.df.iloc[i]['class']
+        )
     
     def __len__(self):
         return len(self.df)
@@ -89,6 +92,57 @@ class TransformDataset(Dataset):
         else:
             sample = self.transforms(sample)
         return sample
+
+class Processor:
+    def __call__(self, items):
+        return self.process(items)
+
+    def proc1(self, item):
+        return item
+    
+    def process(self, items): 
+        return [self.proc1(item) for item in items]
+    
+    def deproc1(self, item):
+        return item
+
+    def deprocess(self, items):
+        return [self.deproc1(item) for item in items]
+
+class CategorizeProcessor(Processor):
+    def __init__(self, *args, unk=None, ids_to_categories=None, 
+            max_vocab=60000, min_freq=0, **kwargs):
+        super(CategorizeProcessor, self).__init__(*args, **kwargs)
+        unk = unk or ('<unk>',0)
+        assert isinstance(unk,tuple) and len(unk)==2 \
+            and isinstance(unk[0],str) and isinstance(unk[1],int)
+        self.ids_to_categories = ids_to_categories
+        self.max_vocab = max_vocab
+        self.min_freq = min_freq
+        self.unk = unk
+        self.special_categories = [unk]
+    
+    def __call__(self, items):
+        if self.ids_to_categories is None:
+            freq = Counter(items)
+            self.ids_to_categories = [o for o,c in freq.most_common() 
+                if c >= self.min_freq]
+            for cat,idx in sorted(self.special_categories, 
+                key=lambda d:d[1]):
+                if cat in self.ids_to_categories: 
+                    self.ids_to_categories.remove(cat)
+                self.ids_to_categories.insert(idx, cat)
+        if getattr(self, 'categories_to_ids', None) is None:
+            self.categories_to_ids = defaultdict(lambda: self.unk[1], {
+                v:k for k,v in enumerate(self.ids_to_categories)
+            })
+        return super(CategorizeProcessor, self).__call__(items)
+    
+    def proc1(self, category):
+        return self.categories_to_ids[category]
+    
+    def deproc1(self, idx):
+        return self.ids_to_categories[idx]
 
 class TaskSampler:
     def __init__(self, n_class, cardinality, n_episodes):
@@ -124,21 +178,26 @@ def collate(pad_idx, samples):
     xs,xq = pad(xs),pad(xq)
     xb = xs,xq
     n_query = xq.size(1)
-    idx = torch.arange(0,n_class) \
-        .view(n_class,1,1) \
-        .expand(n_class,n_query,1).long() \
-        .contiguous() \
-        .view(n_class*n_query,-1)
+    if n_query:
+        idx = torch.arange(0,n_class) \
+            .view(n_class,1,1) \
+            .expand(n_class,n_query,1).long() \
+            .contiguous() \
+            .view(n_class*n_query,-1)
+    else:
+        idx = LongTensor([])
     yb = idx,LongTensor(ys)
     return xb,yb
 
 def get_dl(fp, tokenizer, n_way, n_episodes, pad_token_id=0, 
         n_support=-1, n_query=0):
-    ds = ClassDataset.from_tsv(fp, tokenizer, names=['task','class','text'], 
+    ds = ClassDataset.from_tsv(fp, tokenizer, 
+        names=['task','class','text'], 
         n_support=n_support, n_query=n_query)
     sampler = TaskSampler(len(ds), n_way, n_episodes)
     collate_fn = partial(collate, pad_token_id)
-    return DataLoader(ds, batch_sampler=sampler, collate_fn=collate_fn)
+    return DataLoader(ds, batch_sampler=sampler, 
+        collate_fn=collate_fn)
 
 class DataBunch:
     def __init__(self, train_dl, valid_dl):
