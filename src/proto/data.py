@@ -1,4 +1,3 @@
-import random
 from functools import partial, reduce
 from pathlib import Path
 from collections import Counter, defaultdict
@@ -18,16 +17,16 @@ def read_tsv(*args, converters=None, **kwargs):
     return df
 
 class ClassDataset(Dataset):
-    def __init__(self, df, tokenizer, n_support=-1, n_query=0):
+    def __init__(self, df, n_support=-1, n_query=0):
         super(ClassDataset, self).__init__()
         self.n_support = n_support
         self.n_query = n_query
+        self.df = df
         self.grouped = list(df.groupby('class'))
         for k,g in self.grouped:
             assert len(g) >= n_support+n_query, ('You requested '
             f'{n_support} supports and {n_query} queries per class '
             f'but class {k} only has {len(g)} samples.')
-        self.tokenizer = tokenizer
     
     @classmethod
     def from_tsv(cls, fp, *args, names=None, converters=None, **kwargs):
@@ -35,19 +34,23 @@ class ClassDataset(Dataset):
         return cls(df, *args, **kwargs)
     
     def __getitem__(self, i):
+        k = self.grouped[i][0]
         if self.n_support == -1: # return all samples as supports
             samples = self.grouped[i][1]
             samples = samples['text'].tolist()
-            tokenized = self.tokenizer(samples)
-            return tokenized, [], []
+            return {
+                'supports': samples,
+                'queries': [],
+                'class': k
+            }
         n = self.n_support + self.n_query
         samples = self.grouped[i][1].sample(n)
         samples = samples['text'].tolist()
-        tokenized = self.tokenizer(samples)
-        supports = tokenized[:self.n_support]
-        queries = tokenized[self.n_support:]
-        # i is the index of the class
-        return supports, queries, [i]*len(queries)
+        return {
+            'supports': samples[:self.n_support],
+            'queries': samples[self.n_support:],
+            'class': k
+        }
     
     def __len__(self):
         return len(self.grouped)
@@ -158,15 +161,16 @@ class TaskSampler:
             yield torch.randperm(self.n_class)[:self.cardinality]
 
 def collate(pad_idx, samples):
-    xs, xq, ys = [],[],[]
+    xs, xq, ks = [],[],[]
     max_len = 0
     n_class = 0
-    for ds,dq,y in samples:
+    for s in samples:
         n_class += 1
-        xs.append(ds)
-        xq.append(dq)
-        ys.append(y)
-        for d in ds+dq: max_len = max(max_len, len(d))
+        xs.append(s['supports'])
+        xq.append(s['queries'])
+        ks.append(s['class'])
+        for d in s['supports']+s['queries']: 
+            max_len = max(max_len, len(d))
     def pad(data):
         n_examples = len(data[0])
         padded = torch.zeros(n_class, n_examples, 
@@ -186,14 +190,21 @@ def collate(pad_idx, samples):
             .view(n_class*n_query,-1)
     else:
         idx = LongTensor([])
-    yb = idx,LongTensor(ys)
+    yb = idx,LongTensor(ks)
     return xb,yb
 
-def get_dl(fp, tokenizer, n_way, n_episodes, pad_token_id=0, 
+def get_dl(fp, tokenizer, categorizer, n_way, n_episodes, pad_token_id=0, 
         n_support=-1, n_query=0):
-    ds = ClassDataset.from_tsv(fp, tokenizer, 
+    ds = ClassDataset.from_tsv(fp, 
         names=['task','class','text'], 
         n_support=n_support, n_query=n_query)
+    _ = categorizer(ds.df['class']) # learn mapping
+    transforms = {
+        'supports': tokenizer,
+        'queries': tokenizer,
+        'class': categorizer.proc1
+    }
+    ds = TransformDataset(ds, transforms)
     sampler = TaskSampler(len(ds), n_way, n_episodes)
     collate_fn = partial(collate, pad_token_id)
     return DataLoader(ds, batch_sampler=sampler, 

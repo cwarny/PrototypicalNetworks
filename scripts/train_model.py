@@ -5,7 +5,7 @@ from functools import partial
 import torch
 import torch.optim as optim
 from transformers import BertTokenizer
-from proto.data import DataBunch
+from proto.data import DataBunch, CategorizeProcessor
 from proto.train import (Learner, StopEarly, Measure,
     Schedule, SetDevice, loss)
 from proto.model import ProtoNet
@@ -37,10 +37,11 @@ def train_model(config):
 
     tokenizer = BertTokenizer.from_pretrained(encoder_name, 
         cache_dir=encoder_dir)
-    tok = lambda x: tokenizer(x)['input_ids']
+    tok = lambda x: tokenizer(x)['input_ids'] if len(x) else x
     pad_token_id = tokenizer.pad_token_id
+    cat = CategorizeProcessor()
 
-    data = DataBunch.from_data_dir(data_dir, tok, n_way, 
+    data = DataBunch.from_data_dir(data_dir, tok, cat, n_way, 
         n_episodes, n_support=n_support, n_query=n_query, 
         pad_token_id=pad_token_id)
     

@@ -16,6 +16,8 @@ def parse_args():
         action='store_true')
     parser.add_argument('--min-samples', type=int, default=30,
         help='min number of samples per class')
+    parser.add_argument('--meta-split', type=float, default=.8)
+    parser.add_argument('--split', type=float, default=.5)
     return parser.parse_args()
 
 def main(args):
@@ -38,22 +40,25 @@ def main(args):
         .groupby('class') \
         .filter(lambda g: len(g)>=args.min_samples)
     
-    # Split tasks into meta-training and meta-testing
+    # Split tasks into meta-training, meta-validation
+    # and meta-testing
     if args.disjoint:
         train_tasks, test_tasks = train_test_split(
-            df['task'].unique(), train_size=.8)
+            df['task'].unique(), train_size=args.meta_split)
+        train_tasks, valid_tasks = train_test_split(
+            train_tasks, train_size=args.meta_split)
         meta_train = df[df['task'].isin(train_tasks)]
+        meta_valid = df[df['task'].isin(valid_tasks)]
         meta_test = df[df['task'].isin(test_tasks)]
     else:
         meta_train, meta_test = train_test_split(df, 
-            train_size=.8, stratify=df['task'])
+            train_size=args.meta_split, stratify=df['task'])
+        meta_train, meta_valid = train_test_split(meta_train, 
+            train_size=args.meta_split, stratify=meta_train['task'])
 
-    # split meta-train data into meta-train and meta-valid
-    meta_train, meta_valid = train_test_split(meta_train, 
-        train_size=.8, stratify=meta_train['class'])
     # split meta-test data into train and test
     train, test = train_test_split(meta_test, 
-        train_size=.5, stratify=meta_test['class'])
+        train_size=args.split, stratify=meta_test['class'])
     
     meta_dir = data_dir/'meta'
     tasks_dir = data_dir/'tasks'
