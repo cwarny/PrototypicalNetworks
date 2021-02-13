@@ -28,7 +28,7 @@ class ClassDataset(Dataset):
         for k, g in original_group:
             if len(g) < n_support + n_query:
                 logging.warning(f'You requested '
-                                f'{n_support} supports and {n_query} queries per class '
+                                f'{n_support} supports and {n_query} queries per class, '
                                 f'but class {k} only has {len(g)} samples.\n'
                                 f'Class {k} is removed from the dataset.')
             else:
