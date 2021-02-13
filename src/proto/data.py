@@ -2,6 +2,7 @@ from functools import partial, reduce
 from pathlib import Path
 from collections import Counter, defaultdict
 import itertools
+import logging
 import pandas as pd
 import torch
 from torch import LongTensor
@@ -22,12 +23,18 @@ class ClassDataset(Dataset):
         self.n_support = n_support
         self.n_query = n_query
         self.df = df
-        self.grouped = list(df.groupby('class'))
-        for k,g in self.grouped:
-            assert len(g) >= n_support+n_query, ('You requested '
-            f'{n_support} supports and {n_query} queries per class '
-            f'but class {k} only has {len(g)} samples.')
-    
+        original_group = list(df.groupby('class'))
+        filtered_group = []
+        for k, g in original_group:
+            if len(g) < n_support + n_query:
+                logging.warning(f'You requested '
+                                f'{n_support} supports and {n_query} queries per class '
+                                f'but class {k} only has {len(g)} samples.\n'
+                                f'Class {k} is removed from the dataset.')
+            else:
+                filtered_group.append((k, g))
+        self.grouped = filtered_group
+
     @classmethod
     def from_tsv(cls, fp, *args, names=None, converters=None, **kwargs):
         df = read_tsv(fp, names=names, converters=converters)
