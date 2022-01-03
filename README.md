@@ -37,9 +37,7 @@ This meta-gradient involves the second-order derivates of the NLL losses in the 
 ## Data
 
 * `python scripts/prepare_data.py --data-dir <data dir> --input <tsv file> --disjoint`
-* Input tsv file should be in the classic Alexa 3-col format (domain/skill, intent, anno)
-* Example tsv file can be found here: `/apollo/env/HoverboardDefaultMLPS3Tool/bin/mlps3 cp -k "com.amazon.snl-3pi18n.team.hoverboard" s3://hoverboard-shared-snl-3pi18n-eu-west-1/nlu/datasets/fud.tsv.tgz .`
-* The input tsv can have a mix of 3P skills and 1P domains as tasks
+* Input tsv file should be in a 3-col format (domain/skill, intent, anno)
 * The resulting folder in the data dir is as follows:
 
 ```
@@ -55,11 +53,11 @@ tasks/
         test.tsv
 ```
 
-* The `tasks` folder is used for meta-testing on a variety of tasks. A task can refer to a 1P domain or a 3P skill. For a 1P task, the training data consists in the goldens for that task (domain). For a 3P task, the training data consists in the interaction model of that task (skill). The tasks used in meta-testing can be disjoint (`--disjoint`) or not from those used during meta-training. Test data during meta-testing is annotated customer live traffic.
+* The `tasks` folder is used for meta-testing on a variety of tasks. Training data for a task is synthetic. The tasks used in meta-testing can be disjoint (`--disjoint`) or not from those used during meta-training. Test data during meta-testing consist in real utterances.
 
 ## Model
 
-* `/apollo/env/HoverboardDefaultMLPS3Tool/bin/mlps3 cp -r s3://blu-core-model-training-eu/snl/models/huggingface ~/.cache`
+* Install HuggingFace
 * Updated config file: `emacs <yaml config file>`
 * `python scripts/train_model.py -c <yaml config file>`
 
